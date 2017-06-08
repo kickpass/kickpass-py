@@ -14,26 +14,24 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <string.h>
+#include <stdio.h>
+
 #include <Python.h>
 #include "structmember.h"
+
 #include <kickpass/kickpass.h>
 #include <kickpass/safe.h>
+
+PyObject *exception;
+
+static kp_error_t prompt_wrapper(struct kp_ctx *, bool, char *, const char *, va_list);
 
 typedef struct {
 	PyObject_HEAD;
 	struct kp_ctx ctx;
+	PyObject *prompt;
 } Context;
-
-typedef struct {
-	PyObject_HEAD;
-	Context *context;
-	struct kp_safe safe;
-} Safe;
-
-static PyMemberDef Safe_members[] = {
-	{"context", T_OBJECT_EX, offsetof(Safe, context), 0, "context"},
-	{NULL}
-};
 
 static PyObject *
 Context_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
@@ -51,6 +49,23 @@ Context_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 	}
 
 	return (PyObject *)self;
+}
+
+static int
+Context_init(Context *self, PyObject *args, PyObject *kwds)
+{
+	PyObject *prompt;
+
+	static char *kwlist[] = {"prompt", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist, &prompt)) {
+		return -1;
+	}
+
+	self->ctx.password_prompt = prompt_wrapper;
+	self->prompt = prompt;
+
+	return 0;
 }
 
 static void
@@ -96,9 +111,20 @@ static PyTypeObject ContextType = {
 	0,                           /* tp_descr_get */
 	0,                           /* tp_descr_set */
 	0,                           /* tp_dictoffset */
-	0,                           /* tp_init */
+	(initproc)Context_init,      /* tp_init */
 	0,                           /* tp_alloc */
 	Context_new,                 /* tp_new */
+};
+
+typedef struct {
+	PyObject_HEAD;
+	Context *context;
+	struct kp_safe safe;
+} Safe;
+
+static PyMemberDef Safe_members[] = {
+	{"context", T_OBJECT_EX, offsetof(Safe, context), 0, "context"},
+	{NULL}
 };
 
 static PyObject *
@@ -146,7 +172,11 @@ Safe_init(Safe *self, PyObject *args, PyObject *kwds)
 static PyObject *
 Safe_open(Safe *self)
 {
-	if (kp_safe_open(&self->context->ctx, &self->safe, 0) != KP_SUCCESS) {
+	kp_error_t ret;
+
+	if ((ret = kp_safe_open(&self->context->ctx, &self->safe, 0))
+	    != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
 		return NULL;
 	}
 
@@ -240,8 +270,43 @@ PyInit_kickpass(void)
 		return NULL;
 	}
 
+	exception = PyErr_NewException("kickpass.Exception", NULL, NULL);
+	PyModule_AddObject(m, "Exception", exception);
 	PyModule_AddObject(m, "Context", (PyObject *)&ContextType);
 	PyModule_AddObject(m, "Safe", (PyObject *)&SafeType);
 
 	return m;
+}
+
+static kp_error_t
+prompt_wrapper(struct kp_ctx *ctx, bool confirm, char *password, const char *fmt, va_list ap)
+{
+	PyObject *opassword;
+	Context *py_ctx;
+	char *prompt;
+	char *py_password;
+
+	size_t offset = offsetof(Context, ctx);
+	py_ctx = (Context *)((void *)ctx - offset);
+
+	if (vasprintf(&prompt, fmt, ap) < 0) {
+		return KP_ERRNO;
+	}
+
+	opassword = PyObject_CallFunction(py_ctx->prompt, "OOs", py_ctx, confirm?Py_True:Py_False, prompt);
+	if (opassword == NULL) {
+		return KP_ERRNO;
+	}
+
+	py_password = PyUnicode_AsUTF8AndSize(opassword, NULL);
+	if (py_password == NULL) {
+		return KP_ERRNO;
+	}
+
+	if (strlcpy(password, py_password, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
+		errno = ENOMEM;
+		return KP_ERRNO;
+	}
+
+	return KP_SUCCESS;
 }
