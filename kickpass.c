@@ -23,6 +23,8 @@
 #include <kickpass/kickpass.h>
 #include <kickpass/safe.h>
 
+#define KP_PYTHON_ERR -1
+
 PyObject *exception;
 
 static kp_error_t prompt_wrapper(struct kp_ctx *, bool, char *, const char *, va_list);
@@ -509,12 +511,12 @@ prompt_wrapper(struct kp_ctx *ctx, bool confirm, char *password, const char *fmt
 
 	opassword = PyObject_CallFunction(py_ctx->prompt, "OOs", py_ctx, confirm?Py_True:Py_False, prompt);
 	if (opassword == NULL) {
-		return KP_ERRNO;
+		return KP_PYTHON_ERR;
 	}
 
-	py_password = PyUnicode_AsUTF8AndSize(opassword, NULL);
+	py_password = PyBytes_AsString(opassword);
 	if (py_password == NULL) {
-		return KP_ERRNO;
+		return KP_PYTHON_ERR;
 	}
 
 	if (strlcpy(password, py_password, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
@@ -528,6 +530,10 @@ prompt_wrapper(struct kp_ctx *ctx, bool confirm, char *password, const char *fmt
 static void
 raise_kp_exception(kp_error_t err)
 {
+	if (err == KP_PYTHON_ERR) {
+		return;
+	}
+
 	if (err != KP_ERRNO) {
 		PyErr_SetObject(exception, PyUnicode_FromString(kp_strerror(err)));
 	} else {
