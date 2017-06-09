@@ -26,6 +26,7 @@
 PyObject *exception;
 
 static kp_error_t prompt_wrapper(struct kp_ctx *, bool, char *, const char *, va_list);
+static void raise_kp_exception(kp_error_t);
 
 typedef struct {
 	PyObject_HEAD;
@@ -36,6 +37,7 @@ typedef struct {
 static PyObject *
 Context_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
+	kp_error_t ret;
 	Context *self;
 
 	self = (Context *)type->tp_alloc(type, 0);
@@ -43,7 +45,8 @@ Context_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 		return NULL;
 	}
 
-	if (kp_init(&self->ctx) != KP_SUCCESS) {
+	if ((ret = kp_init(&self->ctx)) != KP_SUCCESS) {
+		raise_kp_exception(ret);
 		Py_DECREF(self);
 		return NULL;
 	}
@@ -52,7 +55,7 @@ Context_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 }
 
 static int
-Context_init(Context *self, PyObject *args, PyObject *kwds)
+Context__init__(Context *self, PyObject *args, PyObject *kwds)
 {
 	PyObject *prompt;
 
@@ -74,6 +77,40 @@ Context_dealloc(Context *self)
 	kp_fini(&self->ctx);
 	Py_TYPE(self)->tp_free((PyObject*)self);
 }
+
+static PyObject *
+Context_init(Context *self, PyObject *args, PyObject *kwds)
+{
+	kp_error_t ret;
+	PyObject *opath = NULL;
+	const char *path = "";
+
+	static char *kwlist[] = {"path", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "|O&", kwlist,
+	                                 PyUnicode_FSConverter, &opath)) {
+		return NULL;
+	}
+
+	if (opath != NULL) {
+		path = PyBytes_AsString(opath);
+		Py_DECREF(opath);
+	}
+
+	if ((ret = kp_init_workspace(&self->ctx, path))
+	    != KP_SUCCESS) {
+		raise_kp_exception(ret);
+		return NULL;
+	}
+
+	return Py_None;
+}
+
+static PyMethodDef Context_methods[] = {
+	{"init", (PyCFunction)Context_init, METH_VARARGS | METH_KEYWORDS,
+	 "Initialize a new workspace"},
+	{NULL}
+};
 
 static PyTypeObject ContextType = {
 	PyVarObject_HEAD_INIT(NULL, 0)
@@ -103,7 +140,7 @@ static PyTypeObject ContextType = {
 	0,                           /* tp_weaklistoffset */
 	0,                           /* tp_iter */
 	0,                           /* tp_iternext */
-	0,                           /* tp_methods */
+	Context_methods,             /* tp_methods */
 	0,                           /* tp_members */
 	0,                           /* tp_getset */
 	0,                           /* tp_base */
@@ -111,7 +148,7 @@ static PyTypeObject ContextType = {
 	0,                           /* tp_descr_get */
 	0,                           /* tp_descr_set */
 	0,                           /* tp_dictoffset */
-	(initproc)Context_init,      /* tp_init */
+	(initproc)Context__init__,   /* tp_init */
 	0,                           /* tp_alloc */
 	Context_new,                 /* tp_new */
 };
@@ -138,7 +175,7 @@ Safe_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 }
 
 static int
-Safe_init(Safe *self, PyObject *args, PyObject *kwds)
+Safe__init__(Safe *self, PyObject *args, PyObject *kwds)
 {
 	PyObject *opath;
 	Context *context;
@@ -171,7 +208,7 @@ Safe_open(Safe *self)
 
 	if ((ret = kp_safe_open(&self->context->ctx, &self->safe, 0))
 	    != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return NULL;
 	}
 
@@ -185,7 +222,7 @@ Safe_close(Safe *self)
 
 	if ((ret = kp_safe_close(&self->context->ctx, &self->safe))
 	    != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return NULL;
 	}
 
@@ -199,7 +236,7 @@ Safe_save(Safe *self)
 
 	if ((ret = kp_safe_save(&self->context->ctx, &self->safe))
 	    != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return NULL;
 	}
 
@@ -213,7 +250,7 @@ Safe_delete(Safe *self)
 
 	if ((ret = kp_safe_delete(&self->context->ctx, &self->safe))
 	    != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return NULL;
 	}
 
@@ -249,7 +286,7 @@ Safe_password_setter(PyObject *_self, PyObject *opassword, void *closure)
 
 	if (strlcpy(self->safe.password, password, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
 		errno = ENOMEM;
-		PyErr_SetObject(exception, PyLong_FromLong(KP_ERRNO));
+		raise_kp_exception(KP_ERRNO);
 		return -1;
 	}
 
@@ -270,7 +307,7 @@ Safe_metadata_setter(PyObject *_self, PyObject *ometadata, void *closure)
 
 	if (strlcpy(self->safe.metadata, metadata, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
 		errno = ENOMEM;
-		PyErr_SetObject(exception, PyLong_FromLong(KP_ERRNO));
+		raise_kp_exception(KP_ERRNO);
 		return -1;
 	}
 
@@ -294,7 +331,7 @@ Safe_path_getter(PyObject *_self, void *closure)
 
 	if ((ret = kp_safe_get_path(&self->context->ctx, &self->safe, path,
 	                            PATH_MAX)) != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return NULL;
 	}
 
@@ -320,7 +357,7 @@ Safe_name_setter(PyObject *_self, PyObject *opath, void *closure)
 
 	if ((ret = kp_safe_rename(&self->context->ctx, &self->safe, name))
 	    != KP_SUCCESS) {
-		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		raise_kp_exception(ret);
 		return -1;
 	}
 
@@ -384,9 +421,9 @@ static PyTypeObject SafeType = {
 	0,                           /* tp_descr_get */
 	0,                           /* tp_descr_set */
 	0,                           /* tp_dictoffset */
-	(initproc)Safe_init,         /* tp_init */
+	(initproc)Safe__init__,      /* tp_init */
 	0,                           /* tp_alloc */
-	Safe_new,                 /* tp_new */
+	Safe_new,                    /* tp_new */
 };
 
 static PyObject *
@@ -462,4 +499,10 @@ prompt_wrapper(struct kp_ctx *ctx, bool confirm, char *password, const char *fmt
 	}
 
 	return KP_SUCCESS;
+}
+
+static void
+raise_kp_exception(kp_error_t err)
+{
+	PyErr_SetObject(exception, PyLong_FromLong(err));
 }
