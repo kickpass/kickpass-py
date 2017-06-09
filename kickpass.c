@@ -179,6 +179,20 @@ Safe_open(Safe *self)
 }
 
 static PyObject *
+Safe_close(Safe *self)
+{
+	kp_error_t ret;
+
+	if ((ret = kp_safe_close(&self->context->ctx, &self->safe))
+	    != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		return NULL;
+	}
+
+	return Py_None;
+}
+
+static PyObject *
 Safe_save(Safe *self)
 {
 	kp_error_t ret;
@@ -193,11 +207,11 @@ Safe_save(Safe *self)
 }
 
 static PyObject *
-Safe_close(Safe *self)
+Safe_delete(Safe *self)
 {
 	kp_error_t ret;
 
-	if ((ret = kp_safe_close(&self->context->ctx, &self->safe))
+	if ((ret = kp_safe_delete(&self->context->ctx, &self->safe))
 	    != KP_SUCCESS) {
 		PyErr_SetObject(exception, PyLong_FromLong(ret));
 		return NULL;
@@ -275,7 +289,7 @@ static PyObject *
 Safe_path_getter(PyObject *_self, void *closure)
 {
 	kp_error_t ret;
-	char path[PATH_MAX];
+	char path[PATH_MAX] = "";
 	Safe *self = (Safe *)_self;
 
 	if ((ret = kp_safe_get_path(&self->context->ctx, &self->safe, path,
@@ -284,13 +298,40 @@ Safe_path_getter(PyObject *_self, void *closure)
 		return NULL;
 	}
 
-	return PyBytes_FromString(path);
+	return PyUnicode_DecodeFSDefault(path);
+}
+
+static PyObject *
+Safe_name_getter(PyObject *_self, void *closure)
+{
+	Safe *self = (Safe *)_self;
+
+	return PyUnicode_DecodeFSDefault(self->safe.name);
+}
+
+static int
+Safe_name_setter(PyObject *_self, PyObject *opath, void *closure)
+{
+	kp_error_t ret;
+	char *name;
+	Safe *self = (Safe *)_self;
+
+	name = PyBytes_AsString(opath);
+
+	if ((ret = kp_safe_rename(&self->context->ctx, &self->safe, name))
+	    != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		return -1;
+	}
+
+	return 0;
 }
 
 static PyMethodDef Safe_methods[] = {
 	{"open", (PyCFunction)Safe_open, METH_NOARGS, "Open safe"},
 	{"close", (PyCFunction)Safe_close, METH_NOARGS, "Close safe"},
 	{"save", (PyCFunction)Safe_save, METH_NOARGS, "Save safe"},
+	{"delete", (PyCFunction)Safe_delete, METH_NOARGS, "Delete safe"},
 	{NULL}
 };
 
@@ -303,6 +344,7 @@ static PyGetSetDef Safe_getset[] = {
 	{"password", Safe_password_getter, Safe_password_setter, NULL, NULL},
 	{"metadata", Safe_metadata_getter, Safe_metadata_setter, NULL, NULL},
 	{"path", Safe_path_getter, NULL, NULL, NULL},
+	{"name", Safe_name_getter, Safe_name_setter, NULL, NULL},
 	{NULL}
 };
 
