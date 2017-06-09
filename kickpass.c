@@ -122,11 +122,6 @@ typedef struct {
 	struct kp_safe safe;
 } Safe;
 
-static PyMemberDef Safe_members[] = {
-	{"context", T_OBJECT_EX, offsetof(Safe, context), 0, "context"},
-	{NULL}
-};
-
 static PyObject *
 Safe_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
@@ -183,10 +178,33 @@ Safe_open(Safe *self)
 	return Py_None;
 }
 
-static PyMethodDef Safe_methods[] = {
-	{"open", (PyCFunction)Safe_open, METH_NOARGS, "Open safe"},
-	{NULL}
-};
+static PyObject *
+Safe_save(Safe *self)
+{
+	kp_error_t ret;
+
+	if ((ret = kp_safe_save(&self->context->ctx, &self->safe))
+	    != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		return NULL;
+	}
+
+	return Py_None;
+}
+
+static PyObject *
+Safe_close(Safe *self)
+{
+	kp_error_t ret;
+
+	if ((ret = kp_safe_close(&self->context->ctx, &self->safe))
+	    != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		return NULL;
+	}
+
+	return Py_None;
+}
 
 static void
 Safe_dealloc(Safe *self)
@@ -194,6 +212,82 @@ Safe_dealloc(Safe *self)
 	kp_safe_close(&self->context->ctx, &self->safe);
 	Py_TYPE(self)->tp_free((PyObject*)self);
 }
+
+static PyObject *
+Safe_password_getter(PyObject *_self, void *closure)
+{
+	Safe *self = (Safe *)_self;
+
+	return PyBytes_FromString(self->safe.password);
+}
+
+static int
+Safe_password_setter(PyObject *_self, PyObject *opassword, void *closure)
+{
+	Safe *self = (Safe *)_self;
+	char *password;
+
+	/* TODO ensure safe is open */
+	password = PyBytes_AsString(opassword);
+	if (password == NULL) {
+		return -1;
+	}
+
+	if (strlcpy(self->safe.password, password, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
+		errno = ENOMEM;
+		PyErr_SetObject(exception, PyLong_FromLong(KP_ERRNO));
+		return -1;
+	}
+
+	return 0;
+}
+
+static int
+Safe_metadata_setter(PyObject *_self, PyObject *ometadata, void *closure)
+{
+	Safe *self = (Safe *)_self;
+	char *metadata;
+
+	/* TODO ensure safe is open */
+	metadata = PyBytes_AsString(ometadata);
+	if (metadata == NULL) {
+		return -1;
+	}
+
+	if (strlcpy(self->safe.metadata, metadata, KP_PASSWORD_MAX_LEN) >= KP_PASSWORD_MAX_LEN) {
+		errno = ENOMEM;
+		PyErr_SetObject(exception, PyLong_FromLong(KP_ERRNO));
+		return -1;
+	}
+
+	return 0;
+}
+
+static PyObject *
+Safe_metadata_getter(PyObject *_self, void *closure)
+{
+	Safe *self = (Safe *)_self;
+
+	return PyBytes_FromString(self->safe.metadata);
+}
+
+static PyMethodDef Safe_methods[] = {
+	{"open", (PyCFunction)Safe_open, METH_NOARGS, "Open safe"},
+	{"close", (PyCFunction)Safe_close, METH_NOARGS, "Close safe"},
+	{"save", (PyCFunction)Safe_save, METH_NOARGS, "Save safe"},
+	{NULL}
+};
+
+static PyMemberDef Safe_members[] = {
+	{"context", T_OBJECT_EX, offsetof(Safe, context), 0, "context"},
+	{NULL}
+};
+
+static PyGetSetDef Safe_getset[] = {
+	{"password", Safe_password_getter, Safe_password_setter, NULL, NULL},
+	{"metadata", Safe_metadata_getter, Safe_metadata_setter, NULL, NULL},
+	{NULL}
+};
 
 static PyTypeObject SafeType = {
 	PyVarObject_HEAD_INIT(NULL, 0)
@@ -225,7 +319,7 @@ static PyTypeObject SafeType = {
 	0,                           /* tp_iternext */
 	Safe_methods,                /* tp_methods */
 	Safe_members,                /* tp_members */
-	0,                           /* tp_getset */
+	Safe_getset,                 /* tp_getset */
 	0,                           /* tp_base */
 	0,                           /* tp_dict */
 	0,                           /* tp_descr_get */
