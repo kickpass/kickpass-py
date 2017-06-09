@@ -202,11 +202,27 @@ Safe__init__(Safe *self, PyObject *args, PyObject *kwds)
 }
 
 static PyObject *
-Safe_open(Safe *self)
+Safe_open(Safe *self, PyObject *args, PyObject *kwds)
 {
 	kp_error_t ret;
+	bool create = false, force = false;
+	int flags = 0;
 
-	if ((ret = kp_safe_open(&self->context->ctx, &self->safe, 0))
+	static char *kwlist[] = {"create", "force", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "|pp", kwlist,
+	                                 &create, &force)) {
+		return NULL;
+	}
+
+	if (create) {
+		flags |= KP_CREATE;
+	}
+	if (force) {
+		flags |= KP_FORCE;
+	}
+
+	if ((ret = kp_safe_open(&self->context->ctx, &self->safe, flags))
 	    != KP_SUCCESS) {
 		raise_kp_exception(ret);
 		return NULL;
@@ -269,6 +285,10 @@ Safe_password_getter(PyObject *_self, void *closure)
 {
 	Safe *self = (Safe *)_self;
 
+	if (!self->safe.open) {
+		return Py_None;
+	}
+
 	return PyBytes_FromString(self->safe.password);
 }
 
@@ -293,6 +313,18 @@ Safe_password_setter(PyObject *_self, PyObject *opassword, void *closure)
 	return 0;
 }
 
+static PyObject *
+Safe_metadata_getter(PyObject *_self, void *closure)
+{
+	Safe *self = (Safe *)_self;
+
+	if (!self->safe.open) {
+		return Py_None;
+	}
+
+	return PyBytes_FromString(self->safe.metadata);
+}
+
 static int
 Safe_metadata_setter(PyObject *_self, PyObject *ometadata, void *closure)
 {
@@ -312,14 +344,6 @@ Safe_metadata_setter(PyObject *_self, PyObject *ometadata, void *closure)
 	}
 
 	return 0;
-}
-
-static PyObject *
-Safe_metadata_getter(PyObject *_self, void *closure)
-{
-	Safe *self = (Safe *)_self;
-
-	return PyBytes_FromString(self->safe.metadata);
 }
 
 static PyObject *
@@ -365,7 +389,7 @@ Safe_name_setter(PyObject *_self, PyObject *opath, void *closure)
 }
 
 static PyMethodDef Safe_methods[] = {
-	{"open", (PyCFunction)Safe_open, METH_NOARGS, "Open safe"},
+	{"open", (PyCFunction)Safe_open, METH_VARARGS | METH_KEYWORDS, "Open safe"},
 	{"close", (PyCFunction)Safe_close, METH_NOARGS, "Close safe"},
 	{"save", (PyCFunction)Safe_save, METH_NOARGS, "Save safe"},
 	{"delete", (PyCFunction)Safe_delete, METH_NOARGS, "Delete safe"},

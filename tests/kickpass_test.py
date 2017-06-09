@@ -33,7 +33,7 @@ class TestKickpass(unittest.TestCase):
         self.home.cleanup()
 
     def prompt(self):
-        return "test password"
+        return "master password"
 
     def test_get_context(self):
         # When
@@ -54,12 +54,64 @@ class TestKickpass(unittest.TestCase):
     def test_create_safe(self):
         # Given
         ctx = kickpass.Context(prompt=self.prompt)
-
-        # When
         safe = kickpass.Safe(ctx, "test")
 
+        # When
+        safe.open(create=True)
+
         # Then
-        self.assertIsNotNone(safe)
+        safe.close()
+
+    def test_open_inexistant_safe_raise_exception(self):
+        # Given
+        ctx = kickpass.Context(prompt=self.prompt)
+        safe = kickpass.Safe(ctx, "test")
+        exception = None
+
+        # When
+        try:
+            safe.open()
+        except kickpass.Exception as e:
+            exception = e
+
+
+        # Then
+        self.assertIsNotNone(exception)
+
+    def test_edit_safe(self):
+        # Given
+        ctx = kickpass.Context(prompt=self.prompt)
+        safe = kickpass.Safe(ctx, "test")
+        safe.open(create=True)
+
+        # When
+        safe.password = b"test password"
+        safe.metadata = b"metadata"
+        safe.save()
+        safe.close()
+
+        # Then
+        safe.open()
+        self.assertEquals(safe.password, "test password")
+        self.assertEquals(safe.metadata, "metadata")
+
+        safe.close()
+
+    def test_closed_safe_has_no_password(self):
+        # Given
+        ctx = kickpass.Context(prompt=self.prompt)
+        safe = kickpass.Safe(ctx, "test")
+        safe.open(create=True)
+        safe.password = b"test password"
+        safe.metadata = b"metadata"
+        safe.save()
+
+        # When
+        safe.close()
+
+        # Then
+        self.assertIsNone(safe.password)
+        self.assertIsNone(safe.metadata)
 
 if __name__ == '__main__':
         unittest.main()
