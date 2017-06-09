@@ -271,6 +271,22 @@ Safe_metadata_getter(PyObject *_self, void *closure)
 	return PyBytes_FromString(self->safe.metadata);
 }
 
+static PyObject *
+Safe_path_getter(PyObject *_self, void *closure)
+{
+	kp_error_t ret;
+	char path[PATH_MAX];
+	Safe *self = (Safe *)_self;
+
+	if ((ret = kp_safe_get_path(&self->context->ctx, &self->safe, path,
+	                            PATH_MAX)) != KP_SUCCESS) {
+		PyErr_SetObject(exception, PyLong_FromLong(ret));
+		return NULL;
+	}
+
+	return PyBytes_FromString(path);
+}
+
 static PyMethodDef Safe_methods[] = {
 	{"open", (PyCFunction)Safe_open, METH_NOARGS, "Open safe"},
 	{"close", (PyCFunction)Safe_close, METH_NOARGS, "Close safe"},
@@ -286,6 +302,7 @@ static PyMemberDef Safe_members[] = {
 static PyGetSetDef Safe_getset[] = {
 	{"password", Safe_password_getter, Safe_password_setter, NULL, NULL},
 	{"metadata", Safe_metadata_getter, Safe_metadata_setter, NULL, NULL},
+	{"path", Safe_path_getter, NULL, NULL, NULL},
 	{NULL}
 };
 
