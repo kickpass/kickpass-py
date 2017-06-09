@@ -504,5 +504,9 @@ prompt_wrapper(struct kp_ctx *ctx, bool confirm, char *password, const char *fmt
 static void
 raise_kp_exception(kp_error_t err)
 {
-	PyErr_SetObject(exception, PyLong_FromLong(err));
+	if (err != KP_ERRNO) {
+		PyErr_SetObject(exception, PyUnicode_FromString(kp_strerror(err)));
+	} else {
+		PyErr_SetObject(exception, PyUnicode_FromString(strerror(errno)));
+	}
 }
